@@ -1,0 +1,640 @@
+﻿﻿import { useEffect, useMemo, useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import Icon from '@/components/ui/icon';
+import BottomNav from '@/components/BottomNav';
+import { useToast } from '@/hooks/use-toast';
+import { bookingsAPI, Session, Purchase } from '@/config/api';
+import { getTariffById, getCategoriesByTariffId, getTariffNameById } from '@/config/tariffs';
+import {
+  addBookingToHistory,
+  decrementBalance,
+  ensureUserPoolState,
+} from '@/lib/poolStorage';
+
+type TariffId = number;
+
+interface SchedulePageProps {
+  userId?: number;
+  selectedTariffId?: TariffId | null;
+  onNavigate: (page: 'home' | 'schedule' | 'profile' | 'tariffs' | 'notifications' | 'support') => void;
+
+  updateNotificationsCount?: () => void;
+}
+
+function generateDates() {
+  const dates: Array<{ date: string; day: string; fullDate: string }> = [];
+  const today = new Date();
+  const days = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
+  const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + i);
+    dates.push({
+      date: date.getDate() + ' ' + months[date.getMonth()],
+      day: days[date.getDay()],
+      fullDate: date.toISOString().split('T')[0],
+    });
+  }
+  return dates;
+}
+
+const TEST_SESSIONS: Session[] = [
+  {
+    id: 1,
+    session_date: new Date().toISOString(),
+    start_time: '09:00:00',
+    end_time: '09:45:00',
+    available_slots: 10,
+    total_slots: 15,
+    trainer_name: 'Иванов А.С.',
+    specialization: 'Плавание',
+  },
+  {
+    id: 2,
+    session_date: new Date().toISOString(),
+    start_time: '10:00:00',
+    end_time: '10:45:00',
+    available_slots: 5,
+    total_slots: 15,
+    trainer_name: 'Петрова М.И.',
+    specialization: 'Акваэробика',
+  },
+  {
+    id: 3,
+    session_date: new Date().toISOString(),
+    start_time: '11:00:00',
+    end_time: '11:30:00',
+    available_slots: 8,
+    total_slots: 10,
+    trainer_name: 'Петрова М.И.',
+    specialization: 'Детское плавание',
+  },
+  {
+    id: 4,
+    session_date: new Date().toISOString(),
+    start_time: '14:00:00',
+    end_time: '14:45:00',
+    available_slots: 12,
+    total_slots: 15,
+    trainer_name: 'Иванов А.С.',
+    specialization: 'Обучение плаванию',
+  },
+  {
+    id: 5,
+    session_date: new Date().toISOString(),
+    start_time: '15:00:00',
+    end_time: '15:45:00',
+    available_slots: 0,
+    total_slots: 15,
+    trainer_name: 'Петрова М.И.',
+    specialization: 'Акваэробика',
+  },
+  {
+    id: 6,
+    session_date: new Date().toISOString(),
+    start_time: '16:00:00',
+    end_time: '16:30:00',
+    available_slots: 6,
+    total_slots: 10,
+    trainer_name: 'Петрова М.И.',
+    specialization: 'Оздоровительное плавание',
+  },
+];
+
+function ruDate(dateISO: string) {
+  return new Date(dateISO).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+}
+
+export default function SchedulePage({
+  userId,
+  selectedTariffId,
+  onNavigate,
+  updateNotificationsCount,
+}: SchedulePageProps) {
+  const dates = useMemo(() => generateDates(), []);
+
+  const [selectedDate, setSelectedDate] = useState(dates[0].fullDate);
+  const [activeTariffId, setActiveTariffId] = useState<TariffId | null>(selectedTariffId || null);
+  const [showAll, setShowAll] = useState(!selectedTariffId);
+
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+
+  const [loading, setLoading] = useState(false);
+
+  // Booking modal
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+
+  // category selection for “purchase now”
+  const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(0);
+
+  const { toast } = useToast();
+
+  const [balance, setBalance] = useState<number>(0);
+
+  useEffect(() => {
+    if (!userId && userId !== 0) return;
+    try {
+      const st = ensureUserPoolState(userId as any);
+      setBalance(st.balance);
+    } catch {
+      setBalance(0);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (selectedTariffId) {
+      setActiveTariffId(selectedTariffId);
+      setShowAll(false);
+    }
+  }, [selectedTariffId]);
+
+  useEffect(() => {
+    loadSessions();
+    if (userId) loadPurchases();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate, userId]);
+
+  const loadSessions = async () => {
+    setLoading(true);
+    try {
+      const result = await bookingsAPI.getSessions(selectedDate);
+      if (Array.isArray(result) && result.length > 0) setSessions(result);
+      else setSessions(TEST_SESSIONS);
+    } catch {
+      setSessions(TEST_SESSIONS);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadPurchases = async () => {
+    if (!userId) return;
+    try {
+      const userPurchases = await bookingsAPI.getPurchases(userId);
+      setPurchases(Array.isArray(userPurchases) ? userPurchases : []);
+    } catch {
+      setPurchases([]);
+    }
+  };
+
+  const filteredSessions = useMemo(() => {
+    return sessions.filter((s) => {
+      if (showAll || !activeTariffId) return true;
+      const spec = (s.specialization || '').toLowerCase();
+      const tariff = getTariffById(activeTariffId);
+      if (!tariff) return true;
+      const tariffSpec = tariff.specialization.toLowerCase();
+      return spec === tariffSpec || spec.includes(tariffSpec);
+    });
+  }, [sessions, showAll, activeTariffId]);
+
+  const getActivePurchasesForTariff = () => {
+    if (!activeTariffId) return [];
+    return purchases.filter((p) => p.tariffId === activeTariffId && p.usedSessions < p.sessionsCount);
+  };
+
+  const getRemainingForTariff = (tariffId: number | null | undefined) => {
+    if (!tariffId) return 0;
+    const list = purchases.filter((p) => p.tariffId === tariffId && p.usedSessions < p.sessionsCount);
+    return list.reduce((sum, p) => sum + (p.sessionsCount - p.usedSessions), 0);
+  };
+
+  const activeCategories = useMemo(() => {
+    if (!activeTariffId) return [];
+    return getCategoriesByTariffId(activeTariffId);
+  }, [activeTariffId]);
+
+  const hasActivePurchaseForSelectedTariff = useMemo(() => {
+    return getActivePurchasesForTariff().length > 0;
+  }, [purchases, activeTariffId]);
+
+  const handleBookClick = (session: Session) => {
+    setSelectedSession(session);
+    setSelectedCategoryIndex(0);
+    setShowBookingModal(true);
+  };
+
+  const handleBooking = async () => {
+    if (!userId || !selectedSession) return;
+
+    // Determine tariff we will use for category selection.
+    // If activeTariffId is not set (showAll), force user to choose a tariff.
+    if (!activeTariffId) {
+      toast({
+        title: 'Выберите тариф',
+        description: 'Для записи выберите тариф на странице «Тарифы».',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const tariffId = activeTariffId;
+    const tariffName = getTariffNameById(tariffId);
+
+    const categories = getCategoriesByTariffId(tariffId);
+    const selectedCategory = categories[selectedCategoryIndex];
+
+    if (!selectedCategory) {
+      toast({
+        title: 'Ошибка',
+        description: 'Неверно выбранное количество занятий',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Если у пользователя уже есть активная покупка по этому тарифу и остаток > 0 — списываем 1.
+    // Иначе — имитируем покупку разового количества (увеличивать balance НЕ будем), но запись оформляем.
+    const activePurchase = getActivePurchasesForTariff()[0] || null;
+    const remainingByPurchase = activePurchase ? activePurchase.sessionsCount - activePurchase.usedSessions : 0;
+    const canUseRemaining = Boolean(activePurchase && remainingByPurchase > 0);
+
+    try {
+      const bookedResult = await bookingsAPI.bookSession(userId, selectedSession.id);
+
+      const bookedOk = bookedResult.success === true || (bookedResult && !bookedResult.error);
+      if (!bookedOk) {
+        toast({
+          title: 'Ошибка',
+          description: bookedResult.error || 'Не удалось записаться',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // If we have active paid sessions for this tariff: use purchase session and decrement balance.
+      if (activePurchase && hasPaidRemainingForService) {
+        await bookingsAPI.usePurchaseSession(userId, activePurchase.id);
+        const nextBalance = decrementBalance(userId, 1);
+        setBalance(nextBalance);
+
+        await addBookingToHistory(userId, {
+          sessionId: selectedSession.id,
+          sessionDate: selectedSession.session_date.split('T')[0],
+          startTime: selectedSession.start_time.slice(0, 5),
+          endTime: selectedSession.end_time?.slice(0, 5),
+          tariffName,
+          categoryName: undefined,
+          specialization: selectedSession.specialization || 'Занятие',
+          trainerName: selectedSession.trainer_name,
+          status: 'предстоит',
+          paidOnSpot: false,
+        });
+
+        await bookingsAPI.addNotification(userId, {
+          type: 'booking',
+          title: 'Запись',
+          message: `Запись подтверждена. Осталось занятий: ${Math.max(0, nextBalance)}.` ,
+          sessionId: selectedSession.id,
+          sessionDate: selectedSession.session_date,
+          sessionTime: selectedSession.start_time,
+          trainerName: selectedSession.trainer_name,
+          tariffName,
+        });
+
+        if (updateNotificationsCount) updateNotificationsCount();
+
+        toast({ title: 'Успешно!', description: 'Запись подтверждена.' });
+        setShowBookingModal(false);
+        return;
+      }
+
+      // Otherwise: on-spot payment imitation.
+      // Requirement:
+      // - If user has balance==0 we keep balance==0 and do not increase.
+      // - We allow booking to pass, and mark history as paidOnSpot.
+      // - If user has balance>0 but no active purchase for this tariff, we still allow on-spot purchase simulation in UI,
+      //   BUT we will not increment balance (per “best keep 0” logic); for simplicity we only book with paidOnSpot.
+
+      await addBookingToHistory(userId, {
+        sessionId: selectedSession.id,
+        sessionDate: selectedSession.session_date.split('T')[0],
+        startTime: selectedSession.start_time.slice(0, 5),
+        endTime: selectedSession.end_time?.slice(0, 5),
+        tariffName,
+        categoryName: selectedCategory.name,
+        specialization: selectedSession.specialization || 'Занятие',
+        trainerName: selectedSession.trainer_name,
+        status: 'предстоит',
+        paidOnSpot: true,
+      });
+
+      await bookingsAPI.addNotification(userId, {
+        type: 'booking',
+        title: 'Запись',
+        message: `Требуется оплата занятия. Время: ${selectedSession.start_time.slice(0, 5)}.`,
+        sessionId: selectedSession.id,
+        sessionDate: selectedSession.session_date,
+        sessionTime: selectedSession.start_time,
+        trainerName: selectedSession.trainer_name,
+        tariffName,
+      });
+
+      if (updateNotificationsCount) updateNotificationsCount();
+
+      toast({
+        title: 'Успешно!',
+        description: 'Занятие забронировано. Оплата — на месте (имитация).',
+      });
+      setShowBookingModal(false);
+    } catch (e: any) {
+      toast({ title: 'Ошибка', description: e?.message || 'Не удалось выполнить операцию', variant: 'destructive' });
+    }
+  };
+
+  // UI: Counter for active purchase by currently selected tariff.
+  const remainingForActiveTariff = useMemo(() => {
+    if (!activeTariffId) return 0;
+    return getRemainingForTariff(activeTariffId);
+  }, [activeTariffId, purchases]);
+
+  return (
+    <div className="min-h-screen pb-20 bg-gradient-to-b from-white to-gray-50">
+      <div className="bg-primary text-white p-6 rounded-b-3xl shadow-lg">
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <Icon name="CalendarDays" size={28} />
+          Расписание
+        </h1>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Dates */}
+        <div className="overflow-x-auto -mx-4 px-4">
+          <div className="flex gap-2 pb-2">
+            {dates.map((item) => (
+              <button
+                key={item.fullDate}
+                onClick={() => setSelectedDate(item.fullDate)}
+                className={
+                  'flex-shrink-0 w-14 p-2 rounded-xl border-2 transition-all ' +
+                  (selectedDate === item.fullDate
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-white border-gray-200')
+                }
+              >
+                <div className="text-center">
+                  <p className="text-xs font-medium">{item.day}</p>
+                  <p className="text-sm font-bold">{item.date.split(' ')[0]}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Header with tariff info */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <Icon name="Clock" size={18} className="text-primary" />
+            Ваш активный абонемент
+          </h2>
+
+          {!showAll && activeTariffId && (
+            <div className="flex items-center gap-2">
+              <Badge variant="default" className="bg-[#9c1d3b] text-base">
+                {getTariffNameById(activeTariffId)}
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowAll(true);
+                  setActiveTariffId(null);
+                  localStorage.removeItem('selected_tariff_id');
+                }}
+              >
+                Сброс
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Active purchase card */}
+        {!showAll && activeTariffId && (
+          <Card className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-2 bg-blue-500 rounded-lg">
+                <Icon name="CreditCard" size={20} className="text-white" />
+              </div>
+              <div>
+                <p className="font-bold text-gray-900">Абонемент активен</p>
+                <p className="text-xs text-gray-600">{getTariffNameById(activeTariffId)}</p>
+              </div>
+            </div>
+
+            {remainingForActiveTariff > 0 ? (
+              <div className="bg-white rounded-xl p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-gray-900">У вас осталось:</span>
+                  <Badge variant="default" className="bg-green-600 text-lg px-4 py-2 h-auto">
+                    {remainingForActiveTariff}
+                  </Badge>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  Счётчик показывает только оплаченные занятия по выбранному тарифу.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-blue-700">
+                <Icon name="Info" size={18} />
+                <span className="text-sm">Оплата/покупка нужна для записи по этому виду</span>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* Sessions list */}
+        {loading ? (
+          <Card className="p-8 text-center">
+            <p className="text-gray-600">Загрузка...</p>
+          </Card>
+        ) : filteredSessions.length === 0 ? (
+          <Card className="p-8 text-center">
+            <Icon name="CalendarX" size={40} className="mx-auto text-gray-300 mb-2" />
+            <p className="text-gray-600">Сеансов нет</p>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {filteredSessions.map((session) => (
+              <Card
+                key={session.id}
+                className={
+                  'p-3 transition-all ' +
+                  (session.available_slots === 0
+                    ? 'opacity-60 bg-gray-50'
+                    : 'hover:shadow-md hover:border-[#9c1d3b]')
+                }
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-bold text-gray-900 text-lg">
+                        {session.start_time.slice(0, 5)} - {session.end_time.slice(0, 5)}
+                      </p>
+                      <Badge
+                        variant={session.available_slots === 0 ? 'destructive' : 'default'}
+                        className={session.available_slots > 5 ? 'bg-green-600' : ''}
+                      >
+                        {session.available_slots === 0 ? 'Мест нет' : session.available_slots + ' мест'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-gray-600 flex items-center gap-1">
+                      <Icon name="User" size={12} />
+                      {session.trainer_name}
+                    </p>
+                    {session.specialization && <p className="text-xs text-gray-500">{session.specialization}</p>}
+                  </div>
+
+                  <Button
+                    onClick={() => handleBookClick(session)}
+                    disabled={session.available_slots === 0 || !userId}
+                    size="sm"
+                    className="bg-[#9c1d3b] hover:bg-[#7a162e]"
+                  >
+                    Записаться
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <BottomNav currentPage="schedule" onNavigate={onNavigate} />
+
+      {/* Booking Modal */}
+      {showBookingModal && selectedSession && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm p-5 bg-white rounded-2xl shadow-xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold">Подтверждение записи</h2>
+              <button
+                onClick={() => setShowBookingModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+                type="button"
+              >
+                <Icon name="X" size={20} />
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-gray-50 rounded-xl border border-gray-200">
+              <p className="font-bold text-gray-900 text-lg">
+                {selectedSession.start_time.slice(0, 5)} - {selectedSession.end_time.slice(0, 5)}
+              </p>
+              <p className="text-sm text-gray-600 flex items-center gap-1 mt-1">
+                <Icon name="Calendar" size={14} />
+                {ruDate(selectedSession.session_date)}
+              </p>
+              <p className="text-sm text-gray-600 flex items-center gap-1 mt-1">
+                <Icon name="User" size={14} />
+                {selectedSession.trainer_name}
+              </p>
+              {selectedSession.specialization && (
+                <Badge variant="default" className="mt-3 bg-[#9c1d3b]">
+                  {selectedSession.specialization}
+                </Badge>
+              )}
+            </div>
+
+            <div className="mb-4">
+              {(() => {
+                // If there is paid remaining for selected tariff => show remaining and simple booking.
+                const remaining = getRemainingForTariff(activeTariffId);
+                if (remaining > 0) {
+                  return (
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="p-2 bg-green-500 rounded-full">
+                          <Icon name="CheckCircle" size={18} className="text-white" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-green-900">Осталось занятий: {remaining}</p>
+                          <p className="text-xs text-green-700">Подтверждение оплаты не требуется</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Otherwise => allow purchase of category amount.
+                return (
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-2 bg-[#9c1d3b]/10 rounded-lg">
+                        <Icon name="CreditCard" size={18} className="text-[#9c1d3b]" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-[#9c1d3b]">Осталось занятий: 0</p>
+                        <p className="text-xs text-gray-600">Требуется оплата занятия</p>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-gray-600 mb-2 flex items-center gap-1">
+                      <Icon name="Info" size={14} />
+                      Выберите, сколько занятий купить (имитация):
+                    </p>
+
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {activeCategories.map((cat, idx) => (
+                        <label
+                          key={idx}
+                          className={
+                            'w-full p-3 rounded-lg border-2 transition-all cursor-pointer ' +
+                            (selectedCategoryIndex === idx
+                              ? 'border-[#9c1d3b] bg-[#9c1d3b]/10'
+                              : 'border-gray-200 hover:border-[#9c1d3b]/50')
+                          }
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="radio"
+                              name="abonent"
+                              checked={selectedCategoryIndex === idx}
+                              onChange={() => setSelectedCategoryIndex(idx)}
+                              className="w-4 h-4 text-[#9c1d3b]"
+                            />
+                            <div className="flex-1">
+                              <span className="font-medium text-gray-900">{cat.name}</span>
+                              <p className="text-xs text-gray-500 mt-0.5">{cat.sessions} занятие(й)</p>
+                            </div>
+                            <Badge variant={selectedCategoryIndex === idx ? 'default' : 'secondary'} className="text-base shrink-0">
+                              {cat.price}
+                            </Badge>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+
+                    <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
+                      <Icon name="Info" size={12} />
+                      При подтверждении запись будет оформлена, баланс останется 0 (имитация оплаты на месте).
+                    </p>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowBookingModal(false)} className="flex-1">
+                Отмена
+              </Button>
+
+              <Button
+                onClick={handleBooking}
+                className="flex-1 bg-[#9c1d3b] hover:bg-[#7a162e]"
+                disabled={!activeTariffId}
+              >
+                {getRemainingForTariff(activeTariffId) > 0 ? 'Записаться' : 'Оплатить и записаться'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+

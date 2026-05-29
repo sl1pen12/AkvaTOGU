@@ -1,0 +1,39 @@
+WARN no base for StrReplace: src\config\api.ts
+WARN no base for StrReplace: src\config\api.ts
+WARN no base for StrReplace: src\pages\HomePage.tsx
+WARN no base for StrReplace: src\pages\HomePage.tsx
+WARN StrReplace miss: src\App.tsx
+WARN no base for StrReplace: src\pages\HomePage.tsx
+WARN no base for StrReplace: src\pages\ProfilePage.tsx
+WARN no base for StrReplace: src\pages\ProfilePage.tsx
+WARN no base for StrReplace: src\config\api.ts
+WARN no base for StrReplace: src\config\api.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\config\tariffs.ts
+WARN StrReplace miss: src\pages\SchedulePage.tsx
+WARN no base for StrReplace: src\pages\ProfilePage.tsx
+WARN no base for StrReplace: src\pages\ProfilePage.tsx
+WARN no base for StrReplace: src\pages\ProfilePage.tsx
+WARN no base for StrReplace: src\config\api.ts
+WARN no base for StrReplace: android\app\src\main\AndroidManifest.xml
+WARN no base for StrReplace: android\app\build.gradle
+WARN no base for StrReplace: android\app\build.gradle
+WARN no base for StrReplace: android\gradle.properties
+WARN no base for StrReplace: package.json
+WARN no base for StrReplace: android\gradle.properties
+WARN StrReplace miss: src\pages\SchedulePage.tsx
+WARN StrReplace miss: src\pages\SchedulePage.tsx
+WARN StrReplace miss: src\pages\SchedulePage.tsx
+WARN no base for StrReplace: src\config\api.ts
+Recovered 25 files from 49 ops
+Output: c:\project\mobile-app-creation-2-main\_restored_from_transcript
